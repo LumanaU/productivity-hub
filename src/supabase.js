@@ -1,12 +1,14 @@
 import { createClient } from "@supabase/supabase-js";
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabaseKey = import.meta.env.VITE_SUPABASE_KEY;
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || "";
+const supabaseKey = import.meta.env.VITE_SUPABASE_KEY || "";
 
-if (!supabaseUrl || !supabaseKey) {
-  console.error(
-    "Missing Supabase env vars. Set VITE_SUPABASE_URL and VITE_SUPABASE_KEY in Vercel or .env.local"
-  );
+export const supabaseReady = !!(supabaseUrl && supabaseKey);
+
+if (!supabaseReady) {
+  console.warn("Missing Supabase env vars — app will run in offline mode.");
 }
 
-export const supabase = createClient(supabaseUrl || "", supabaseKey || "");
+export const supabase = supabaseReady
+  ? createClient(supabaseUrl, supabaseKey)
+  : null;
