@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { supabase } from "./supabase.js";
+import { supabase, supabaseReady } from "./supabase.js";
 
 const TABS = ["Tasks","Calendar","Alarms","Timer","Integrations","Settings"];
 const PRIORITIES = ["low","medium","high"];
@@ -79,11 +79,12 @@ export default function App() {
 
   // Check session on mount + listen for auth changes
   useEffect(() => {
+    if (!supabaseReady || !supabase) { setAuthLoading(false); return; }
     supabase.auth.getSession().then(({ data: { session } }) => {
       setAuthUser(session?.user ?? null);
       if (session?.user) loadProfile(session.user.id);
       else setAuthLoading(false);
-    });
+    }).catch(() => setAuthLoading(false));
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setAuthUser(session?.user ?? null);
       if (session?.user) loadProfile(session.user.id);
@@ -93,8 +94,10 @@ export default function App() {
   }, []);
 
   const loadProfile = async (uid) => {
-    const { data } = await supabase.from("profiles").select("*").eq("id", uid).single();
-    setProfile(data);
+    try {
+      const { data } = await supabase.from("profiles").select("*").eq("id", uid).single();
+      setProfile(data);
+    } catch(e) { console.error("Profile load error:", e); }
     setAuthLoading(false);
   };
 
@@ -102,6 +105,7 @@ export default function App() {
     e.preventDefault();
     setAuthError("");
     if (!authEmail.trim()) return;
+    if (!supabaseReady || !supabase) { setAuthError("Supabase not configured — check environment variables."); return; }
     const { error } = await supabase.auth.signInWithOtp({
       email: authEmail.trim(),
       options: { emailRedirectTo: window.location.origin },
@@ -111,7 +115,7 @@ export default function App() {
   };
 
   const handleLogout = async () => {
-    await supabase.auth.signOut();
+    if (supabase) await supabase.auth.signOut();
     setAuthUser(null);
     setProfile(null);
   };
@@ -196,27 +200,30 @@ export default function App() {
 
   // ── Supabase: Load analysts + marks from database ────────
   const loadAnalystsFromDb = useCallback(async () => {
-    const { data } = await supabase.from("analysts").select("*").order("created_at");
-    if (data) {
-      // Load marks for each analyst
-      const { data: marksData } = await supabase.from("marks").select("*").order("marked_at");
-      const analystMap = data.map(a => {
-        const aMarks = (marksData || []).filter(m => m.analyst_id === a.id);
-        const marksByDate = {};
-        aMarks.forEach(m => {
-          if (!marksByDate[m.mark_date]) marksByDate[m.mark_date] = {};
-          marksByDate[m.mark_date][m.mark_type] = m.marked_at;
+    if (!supabaseReady || !supabase) return;
+    try {
+      const { data } = await supabase.from("analysts").select("*").order("created_at");
+      if (data) {
+        const { data: marksData } = await supabase.from("marks").select("*").order("marked_at");
+        const analystMap = data.map(a => {
+          const aMarks = (marksData || []).filter(m => m.analyst_id === a.id);
+          const marksByDate = {};
+          aMarks.forEach(m => {
+            if (!marksByDate[m.mark_date]) marksByDate[m.mark_date] = {};
+            marksByDate[m.mark_date][m.mark_type] = m.marked_at;
+          });
+          return { ...a, enterpriseId: a.enterprise_id, fullName: a.full_name, marks: marksByDate };
         });
-        return { ...a, enterpriseId: a.enterprise_id, fullName: a.full_name, marks: marksByDate };
-      });
-      setAnalysts(analystMap);
-    }
+        setAnalysts(analystMap);
+      }
+    } catch(e) { console.error("Load analysts error:", e); }
   }, []);
 
   useEffect(() => { loadAnalystsFromDb(); }, [loadAnalystsFromDb]);
 
   // ── Supabase: Real-time subscription for live updates ────
   useEffect(() => {
+    if (!supabaseReady || !supabase) return;
     const channel = supabase.channel("realtime-marks")
       .on("postgres_changes", { event: "*", schema: "public", table: "marks" }, () => { loadAnalystsFromDb(); })
       .on("postgres_changes", { event: "*", schema: "public", table: "analysts" }, () => { loadAnalystsFromDb(); })
@@ -432,23 +439,32 @@ export default function App() {
     const {enterpriseId,fullName} = newAnalyst;
     if(!enterpriseId.trim() && !fullName.trim()) return;
     if(analysts.some(a=>a.enterpriseId===enterpriseId.trim()&&enterpriseId.trim())) return;
-    const { error } = await supabase.from("analysts").insert({
-      enterprise_id: enterpriseId.trim(),
-      full_name: fullName.trim() || enterpriseId.trim(),
-      email: "",
-      created_by: authUser?.id,
-    });
-    if (!error) {
-      loadAnalystsFromDb();
-      setNewAnalyst({enterpriseId:"",fullName:""});
+    if (supabaseReady && supabase) {
+      const { error } = await supabase.from("analysts").insert({
+        enterprise_id: enterpriseId.trim(),
+        full_name: fullName.trim() || enterpriseId.trim(),
+        email: "",
+        created_by: authUser?.id,
+      });
+      if (!error) loadAnalystsFromDb();
+    } else {
+      setAnalysts(prev=>[...prev,{
+        id: Date.now().toString(), enterpriseId: enterpriseId.trim(),
+        fullName: fullName.trim() || enterpriseId.trim(), marks: {},
+      }]);
     }
+    setNewAnalyst({enterpriseId:"",fullName:""});
   };
 
   const removeAnalyst = async (id) => {
     const target = analysts.find(a=>a.id===id);
-    await supabase.from("marks").delete().eq("analyst_id", id);
-    await supabase.from("analysts").delete().eq("id", id);
-    loadAnalystsFromDb();
+    if (supabaseReady && supabase) {
+      await supabase.from("marks").delete().eq("analyst_id", id);
+      await supabase.from("analysts").delete().eq("id", id);
+      loadAnalystsFromDb();
+    } else {
+      setAnalysts(prev=>prev.filter(a=>a.id!==id));
+    }
     if(currentAnalystId===id) setCurrentAnalystId("");
     if(target){
       setPopup({title:`🗑 ${target.fullName} removed`, body:"Analyst deleted from tracking."});
@@ -614,17 +630,19 @@ export default function App() {
     const now = new Date().toISOString();
     setMarks(prev=>({...prev, [key]:now}));
     const mk = MARK_KEYS.find(m=>m.key===key);
-    if (currentAnalystId) {
-      await supabase.from("marks").insert({
-        analyst_id: currentAnalystId,
-        user_id: authUser?.id,
-        mark_type: key,
-        mark_label: mk?.label || key,
-        mark_icon: mk?.icon || "",
-        mark_color: mk?.color || "",
-        source: "mark_panel",
-      });
-      loadAnalystsFromDb();
+    if (currentAnalystId && supabaseReady && supabase) {
+      try {
+        await supabase.from("marks").insert({
+          analyst_id: currentAnalystId,
+          user_id: authUser?.id,
+          mark_type: key,
+          mark_label: mk?.label || key,
+          mark_icon: mk?.icon || "",
+          mark_color: mk?.color || "",
+          source: "mark_panel",
+        });
+        loadAnalystsFromDb();
+      } catch(e) { console.error("Mark save error:", e); }
     }
     if(mk) manualLog({id:key, label:mk.label, icon:mk.icon, color:mk.color});
   };
