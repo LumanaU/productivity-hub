@@ -74,7 +74,8 @@ export default function App() {
   const [profile, setProfile]         = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [authEmail, setAuthEmail]     = useState("");
-  const [authSent, setAuthSent]       = useState(false);
+  const [authPassword, setAuthPassword] = useState("");
+  const [authMode, setAuthMode]     = useState("login");
   const [authError, setAuthError]     = useState("");
 
   // Check session on mount + listen for auth changes
@@ -104,14 +105,21 @@ export default function App() {
   const handleLogin = async (e) => {
     e.preventDefault();
     setAuthError("");
-    if (!authEmail.trim()) return;
+    if (!authEmail.trim() || !authPassword) { setAuthError("Enter email and password."); return; }
     if (!supabaseReady || !supabase) { setAuthError("Supabase not configured — check environment variables."); return; }
-    const { error } = await supabase.auth.signInWithOtp({
-      email: authEmail.trim(),
-      options: { emailRedirectTo: window.location.origin },
-    });
-    if (error) setAuthError(error.message);
-    else setAuthSent(true);
+    if (authMode === "signup") {
+      const { error } = await supabase.auth.signUp({
+        email: authEmail.trim(),
+        password: authPassword,
+      });
+      if (error) setAuthError(error.message);
+    } else {
+      const { error } = await supabase.auth.signInWithPassword({
+        email: authEmail.trim(),
+        password: authPassword,
+      });
+      if (error) setAuthError(error.message);
+    }
   };
 
   const handleLogout = async () => {
@@ -136,32 +144,26 @@ export default function App() {
       <div style={{background:"#fff",borderRadius:"18px",padding:"40px 36px",maxWidth:"400px",width:"100%",boxShadow:"0 4px 24px rgba(0,0,0,0.08)",textAlign:"center"}}>
         <div style={{fontSize:"48px",marginBottom:"8px"}}>⚡</div>
         <div style={{fontSize:"22px",fontWeight:700,color:"#1e1b4b",marginBottom:"4px"}}>Productivity Hub</div>
-        <div style={{fontSize:"13px",color:"#6b7280",marginBottom:"28px"}}>Sign in with your email to continue</div>
-        {authSent ? (
-          <div>
-            <div style={{fontSize:"40px",marginBottom:"12px"}}>📧</div>
-            <div style={{fontWeight:600,color:"#1e1b4b",marginBottom:"6px"}}>Check your email!</div>
-            <div style={{fontSize:"13px",color:"#6b7280",lineHeight:1.6}}>
-              We sent a magic link to <strong>{authEmail}</strong>.<br/>
-              Click the link in the email to sign in.<br/>
-              (Check your spam folder if you don't see it)
-            </div>
-            <button onClick={()=>setAuthSent(false)} style={{marginTop:"20px",background:"none",border:"1.5px solid #e5e7eb",borderRadius:"10px",padding:"8px 20px",cursor:"pointer",fontSize:"13px",color:"#6b7280"}}>Use a different email</button>
-          </div>
-        ) : (
-          <div>
+        <div style={{fontSize:"13px",color:"#6b7280",marginBottom:"28px"}}>{authMode==="signup"?"Create your account":"Sign in to continue"}</div>
+        <div>
             <input type="email" placeholder="you@company.com" value={authEmail}
               onChange={e=>setAuthEmail(e.target.value)}
+              style={{width:"100%",padding:"12px 16px",borderRadius:"10px",border:"1.5px solid #e5e7eb",fontSize:"15px",outline:"none",marginBottom:"10px",boxSizing:"border-box"}} />
+            <input type="password" placeholder="Password (min 6 characters)" value={authPassword}
+              onChange={e=>setAuthPassword(e.target.value)}
               onKeyDown={e=>e.key==="Enter"&&handleLogin(e)}
               style={{width:"100%",padding:"12px 16px",borderRadius:"10px",border:"1.5px solid #e5e7eb",fontSize:"15px",outline:"none",marginBottom:"12px",boxSizing:"border-box"}} />
             {authError && <div style={{color:"#ef4444",fontSize:"13px",marginBottom:"10px"}}>{authError}</div>}
             <button onClick={handleLogin}
               style={{width:"100%",padding:"12px",borderRadius:"10px",border:"none",background:"#6366f1",color:"#fff",fontSize:"15px",fontWeight:600,cursor:"pointer"}}>
-              Send magic link
+              {authMode==="signup"?"Create account":"Sign in"}
             </button>
-            <div style={{fontSize:"12px",color:"#a1a1aa",marginTop:"14px"}}>No password needed — we'll email you a sign-in link</div>
-          </div>
-        )}
+            <div style={{fontSize:"13px",color:"#6b7280",marginTop:"14px"}}>
+              {authMode==="signup"
+                ? <>Already have an account? <button onClick={()=>{setAuthMode("login");setAuthError("");}} style={{background:"none",border:"none",color:"#6366f1",cursor:"pointer",fontWeight:600,fontSize:"13px",padding:0}}>Sign in</button></>
+                : <>New here? <button onClick={()=>{setAuthMode("signup");setAuthError("");}} style={{background:"none",border:"none",color:"#6366f1",cursor:"pointer",fontWeight:600,fontSize:"13px",padding:0}}>Create account</button></>}
+            </div>
+        </div>
       </div>
     </div>
   );
