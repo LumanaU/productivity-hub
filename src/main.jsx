@@ -1,12 +1,21 @@
-import { createClient } from "@supabase/supabase-js";
+import React from "react";
+import ReactDOM from "react-dom/client";
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabaseKey = import.meta.env.VITE_SUPABASE_KEY;
+const root = document.getElementById("root");
 
-if (!supabaseUrl || !supabaseKey) {
-  console.error(
-    "Missing Supabase env vars. Set VITE_SUPABASE_URL and VITE_SUPABASE_KEY in Vercel or .env.local"
-  );
+async function startApp() {
+  try {
+    const { default: App } = await import("./App.jsx");
+    ReactDOM.createRoot(root).render(
+      React.createElement(React.StrictMode, null, React.createElement(App))
+    );
+  } catch (e) {
+    root.innerHTML = '<div style="padding:40px;font-family:sans-serif">'
+      + '<h1 style="color:#ef4444">App Error</h1>'
+      + '<pre style="color:#ef4444;white-space:pre-wrap;font-size:14px">'
+      + e.message + '\n\n' + e.stack + '</pre></div>';
+    console.error("App failed to load:", e);
+  }
 }
 
-export const supabase = createClient(supabaseUrl || "", supabaseKey || "");
+startApp();
